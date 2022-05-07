@@ -163,3 +163,8 @@ models/exchange/kraken
 script-kraken.py
 script-krakenv2.py
 *.stats
+
+# Custom rules
+0-setenv.sh
+portainer_data/
+market/config-*.json

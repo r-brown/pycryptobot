@@ -1,0 +1,18 @@
+
+  %MARKET-DOCKER-SERVICE%:
+    build:
+      context: .
+    container_name: %MARKET%-%LIVE%
+    volumes:
+      - ./market/config-%MARKET%.json:/app/config.json
+      - ./logs:/app/logs
+      - ./graphs:/app/graphs
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 100M

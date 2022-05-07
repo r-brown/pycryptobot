@@ -1,0 +1,35 @@
+{
+    "binance" : {
+        "api_url" : "https://api.binance.com",
+        "api_key" : "%api_key%",
+        "api_secret" : "%api_secret%",
+        "config" : {
+            "base_currency" : "%base_currency%",
+            "quote_currency" : "%quote_currency%",
+            "live" : %live%,
+            "smartswitch" : 1,
+            "graphs" : 0,
+            "sellatloss" : 0,
+            "sellatresistance" : 1,
+            "sellupperpcnt" : 7,
+            "buypercent" : 25,
+            "disablebullonly" : 1,
+            "disablebuynearhigh" : 1,
+            "disablebuyobv" : 0,
+            "disablebuyelderray" : 1,
+            "disablelog" : 0,
+            "disabletracker" : 0
+        }        
+    },
+    "telegram" : {
+        "token" : "%token%",
+        "client_id" : "%client_id%"
+    },
+    "logger" : {
+        "filelog": 1,
+        "logfile": "logs/pycryptobot-%base_currency%%quote_currency%.log",
+        "fileloglevel": "DEBUG",
+        "consolelog": 1,
+        "consoleloglevel": "INFO"
+    }
+}

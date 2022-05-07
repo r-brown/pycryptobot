@@ -1,0 +1,42 @@
+## Install Docker
+$ sudo yum update -y
+$ sudo yum install git -y
+$ git version
+
+## Install Docker
+# https://docs.aws.amazon.com/AmazonECS/latest/developerguide/docker-basics.html
+$ sudo yum update -y
+$ sudo amazon-linux-extras install docker
+$ sudo yum install docker
+$ sudo service docker start
+$ sudo usermod -aG docker $USER
+$ sudo docker info
+
+## Install Docker Compose
+# https://gist.github.com/npearce/6f3c7826c7499587f00957fee62f8ee9
+$ sudo curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+$ sudo chmod +x /usr/local/bin/docker-compose
+$ docker-compose version
+
+## Checkout
+$ git clone https://github.com/r-brown/pycryptobot.git
+$ cd pycryptobot
+
+## System Cleanup
+$ df -h
+$ sudo systemctl stop docker
+$ docker system prune
+$ sudo apt autoremove --purge snapd
+$ sudo rm -rf /var/lib/docker
+$ sudo systemctl restart docker
+
+## System Cleanup
+# https://aws.amazon.com/premiumsupport/knowledge-center/ec2-memory-swap-file/
+$ sudo dd if=/dev/zero of=/swapfile bs=128M count=16
+$ sudo chmod 600 /swapfile
+$ sudo mkswap /swapfile
+$ sudo swapon /swapfile
+$ sudo swapon -s
+$ sudo vi /etc/fstab
+# Add the following new line at the end of the file, save the file, and then exit:
+/swapfile swap swap defaults 0 0

@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+
+  portainer:
+    image: portainer/portainer-ce
+    command: --admin-password %PORTAINER_PASSWORD%
+      -H unix:///var/run/docker.sock
+    restart: always
+    ports:
+      - 9000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./portainer_data:/data

@@ -1,0 +1,12 @@
+export BINANCE_KEY=
+export BINANCE_SECRET=
+export TELEGRAM_TOKEN=
+export TELEGRAM_CLIENT_ID=
+
+export SSH_HOST=
+export SSH_PORT=
+export SSH_USER=
+export SSH_CERT=
+export SSH_REMOTE_DIR=
+
+export PORTAINER_PASSWORD=
