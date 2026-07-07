@@ -18,17 +18,17 @@ from requests import Session
 from websocket import create_connection, WebSocketConnectionClosedException
 
 from models.exchange.Granularity import Granularity
-from models.helper.LogHelper import Logger
+from views.PyCryptoBot import RichText
 
-DEFAULT_MAKER_FEE_RATE = 0.0015  # added 0.0005 to allow for price movements
-DEFAULT_TAKER_FEE_RATE = 0.0015  # added 0.0005 to allow for price movements
-DEFAULT_TRADE_FEE_RATE = 0.0015  # added 0.0005 to allow for price movements
+DEFAULT_MAKER_FEE_RATE = 0.0015  # added 0.0005 to allow for self.price movements
+DEFAULT_TAKER_FEE_RATE = 0.0015  # added 0.0005 to allow for self.price movements
+DEFAULT_TRADE_FEE_RATE = 0.0015  # added 0.0005 to allow for self.price movements
 MULTIPLIER_EQUIVALENTS = [1, 5, 15, 60, 360, 1440]
 DEFAULT_MARKET = "BTCGBP"
 
 
 class AuthAPIBase:
-    def _isMarketValid(self, market: str) -> bool:
+    def _is_market_valid(self, market: str) -> bool:
         p = re.compile(r"^[A-Z0-9]{5,17}$")
         if p.match(market):
             return True
@@ -48,6 +48,7 @@ class AuthAPI(AuthAPIBase):
         api_url: str = "https://api.binance.com",
         order_history: list = [],
         recv_window: int = 5000,
+        app: object = None,
     ) -> None:
         """Binance API object model
 
@@ -62,7 +63,6 @@ class AuthAPI(AuthAPIBase):
         """
 
         # options
-        self.debug = False
         self.die_on_api_error = False
 
         valid_urls = [
@@ -78,12 +78,15 @@ class AuthAPI(AuthAPIBase):
         # validates the api key is syntactically correct
         p = re.compile(r"^[A-z0-9]{64,64}$")
         if not p.match(api_key):
-            self.handle_init_error("Binance API key is invalid")
+            self.handle_init_error("Binance API key is invalid", app=app)
 
         # validates the api secret is syntactically correct
         p = re.compile(r"^[A-z0-9]{64,64}$")
         if not p.match(api_secret):
-            self.handle_init_error("Binance API secret is invalid")
+            self.handle_init_error("Binance API secret is invalid", app=app)
+
+        # app
+        self.app = app
 
         self._api_key = api_key
         self._api_secret = api_secret
@@ -92,11 +95,13 @@ class AuthAPI(AuthAPIBase):
         # order history
         self.order_history = order_history
 
-        # api recvWindow
+        # api recvwindow
         self.recv_window = recv_window
 
-    def handle_init_error(self, err: str) -> None:
-        if self.debug:
+    def handle_init_error(self, err: str, app: object = None) -> None:
+        """Handle initialisation error"""
+
+        if app is not None and app.debug is True:
             raise TypeError(err)
         else:
             raise SystemExit(err)
@@ -117,21 +122,17 @@ class AuthAPI(AuthAPIBase):
         }.get(method, "GET")
 
     def createHash(self, uri: str = ""):
-        return hmac.new(
-            self._api_secret.encode("utf-8"), uri.encode("utf-8"), hashlib.sha256
-        ).hexdigest()
+        return hmac.new(self._api_secret.encode("utf-8"), uri.encode("utf-8"), hashlib.sha256).hexdigest()
 
-    def getTimestamp(self):
+    def get_timestamp(self):
         return int(time.time() * 1000)
 
-    def getAccounts(self) -> pd.DataFrame:
+    def get_accounts(self) -> pd.DataFrame:
         """Retrieves your list of accounts"""
 
         # GET /api/v3/account
         try:
-            resp = self.authAPI(
-                "GET", "/api/v3/account", {"recvWindow": self.recv_window}
-            )
+            resp = self.auth_api("GET", "/api/v3/account", {"recvWindow": self.recv_window})
 
             # unexpected data, then return
             if len(resp) == 0 or "balances" not in resp:
@@ -198,21 +199,21 @@ class AuthAPI(AuthAPIBase):
                 ]
             ]
 
-        except:
+        except Exception:
             return pd.DataFrame()
 
-    def getAccount(self) -> pd.DataFrame:
+    def get_account(self) -> pd.DataFrame:
         """Retrieves all accounts for Binance as there is no specific account id"""
 
-        return self.getAccounts()
+        return self.get_accounts()
 
-    def getFees(self, market: str = "") -> pd.DataFrame:
+    def get_fees(self, market: str = "") -> pd.DataFrame:
         """Retrieves a account fees"""
 
         volume = 0
         try:
             # GET /api/v3/klines
-            resp = self.authAPI(
+            resp = self.auth_api(
                 "GET",
                 "/api/v3/klines",
                 {"symbol": "BTCUSDT", "interval": "1d", "limit": 30},
@@ -243,11 +244,11 @@ class AuthAPI(AuthAPIBase):
 
             df["volume"] = df["volume"].astype(float)
             volume = np.round(float(df[["volume"]].mean()))
-        except:
+        except Exception:
             pass
 
         # GET /api/v3/account
-        resp = self.authAPI("GET", "/api/v3/account", {"recvWindow": self.recv_window})
+        resp = self.auth_api("GET", "/api/v3/account", {"recvWindow": self.recv_window})
 
         # unexpected data, then return
         if len(resp) == 0:
@@ -260,6 +261,14 @@ class AuthAPI(AuthAPIBase):
             maker_fee_rate = 0.001
             taker_fee_rate = 0.001
 
+        # https://www.binance.com/en/support/announcement/binance-launches-zero-fee-bitcoin-trading-10435147c55d4a40b64fcbf43cb46329
+        # UPDATE: https://www.binance.com/en/support/announcement/updates-on-zero-fee-bitcoin-trading-busd-zero-maker-fee-promotion-be13a645cca643d28eab5b9b34f2dc36
+        if market in [
+            "BTCTUSD"
+        ]:
+            maker_fee_rate = 0
+            taker_fee_rate = 0
+
         return pd.DataFrame(
             [
                 {
@@ -271,42 +280,40 @@ class AuthAPI(AuthAPIBase):
             ]
         )
 
-    def getMakerFee(self, market: str = "") -> float:
+    def get_maker_fee(self, market: str = "") -> float:
         """Retrieves the maker fee"""
 
         if len(market):
-            fees = self.getFees(market)
+            fees = self.get_fees(market)
         else:
-            fees = self.getFees()
+            fees = self.get_fees()
 
         if len(fees) == 0 or "maker_fee_rate" not in fees:
-            Logger.error(
-                f"error: 'maker_fee_rate' not in fees (using {DEFAULT_MAKER_FEE_RATE} as a fallback)"
-            )
+            if self.app:
+                RichText.notify(f"error: 'maker_fee_rate' not in fees (using {DEFAULT_MAKER_FEE_RATE} as a fallback)", self.app, "error")
             return DEFAULT_MAKER_FEE_RATE
 
         return float(fees["maker_fee_rate"].to_string(index=False).strip())
 
-    def getTakerFee(self, market: str = "") -> float:
+    def get_taker_fee(self, market: str = "") -> float:
         """Retrieves the taker fee"""
 
-        if len(market) != None:
-            fees = self.getFees(market)
+        if len(market) is not None:
+            fees = self.get_fees(market)
         else:
-            fees = self.getFees()
+            fees = self.get_fees()
 
         if len(fees) == 0 or "taker_fee_rate" not in fees:
-            Logger.error(
-                f"error: 'taker_fee_rate' not in fees (using {DEFAULT_TAKER_FEE_RATE} as a fallback)"
-            )
+            if self.app:
+                RichText.notify(f"error: 'taker_fee_rate' not in fees (using {DEFAULT_TAKER_FEE_RATE} as a fallback)", self.app, "error")
             return DEFAULT_TAKER_FEE_RATE
 
         return float(fees["taker_fee_rate"].to_string(index=False).strip())
 
-    def getUSDVolume(self) -> float:
+    def get_usd_volume(self) -> float:
         """Retrieves the USD volume"""
 
-        fees = self.getFees()
+        fees = self.get_fees()
         return float(fees["usd_volume"].to_string(index=False).strip())
 
     def getMarkets(self) -> list:
@@ -314,7 +321,7 @@ class AuthAPI(AuthAPIBase):
 
         try:
             # GET /api/v3/exchangeInfo
-            resp = self.authAPI("GET", "/api/v3/exchangeInfo")
+            resp = self.auth_api("GET", "/api/v3/exchangeInfo")
 
             # unexpected data, then return
             if len(resp) == 0:
@@ -328,46 +335,40 @@ class AuthAPI(AuthAPIBase):
             else:
                 df = pd.DataFrame()
 
-            return df[df["isSpotTradingAllowed"] == True][["symbol"]].squeeze().tolist()
+            return df[df["isSpotTradingAllowed"] == True][["symbol"]].squeeze().tolist()  # noqa: E712
 
-        except:
+        except Exception:
             return pd.DataFrame()
 
-    def getOrders( #pylint: disable=invalid-name 
-        self,
-        market: str = "",
-        action: str = "",
-        status: str = "done",
-        order_history: list = []
-    ) -> pd.DataFrame: #pylint: disable=dangerous-default-value
+    def get_orders(self, market: str = "", action: str = "", status: str = "done", order_history: list = []) -> pd.DataFrame:
         """Retrieves your list of orders with optional filtering"""
 
         # if market provided
         markets = None
         if market != "":
             # validates the market is syntactically correct
-            if not self._isMarketValid(market):
+            if not self._is_market_valid(market):
                 raise ValueError("Binance market is invalid.")
         else:
             if len(order_history) > 0 or status != "all":
                 full_scan = False
                 self.order_history = order_history
                 if len(self.order_history) > 0:
-                    if self._isMarketValid(market) and market not in self.order_history:
+                    if self._is_market_valid(market) and market not in self.order_history:
                         self.order_history.append(market)
                     markets = self.order_history
             else:
                 full_scan = True
-                markets = self.getMarkets()
+                markets = self.markets
 
         # if action provided
         if action != "":
             # validates action is either a buy or sell
-            if not action in ["buy", "sell"]:
+            if action not in ["buy", "sell"]:
                 raise ValueError("Invalid order action.")
 
         # validates status is either open, canceled, pending, done, active, or all
-        if not status in ["open", "canceled", "pending", "done", "active", "all"]:
+        if status not in ["open", "canceled", "pending", "done", "active", "all"]:
             raise ValueError("Invalid order status.")
 
         try:
@@ -378,11 +379,14 @@ class AuthAPI(AuthAPIBase):
                         print(f"scanning {market} order history.")
 
                     # GET /api/v3/allOrders
-                    resp = self.authAPI(
+                    resp = self.auth_api(
                         "GET",
                         "/api/v3/allOrders",
                         {"symbol": market, "recvWindow": self.recv_window},
                     )
+
+                    if isinstance(resp, str) and resp.endswith("Invalid symbol."):
+                        return "Invalid market."
 
                     # unexpected data, then return
                     if len(resp) == 0:
@@ -407,16 +411,17 @@ class AuthAPI(AuthAPIBase):
                         df = pd.concat([df, df_tmp])
 
                 if full_scan is True:
-                    print(
-                        f"add to order history to prevent full scan: {self.order_history}"
-                    )
+                    print(f"add to order history to prevent full scan: {self.order_history}")
             else:
                 # GET /api/v3/allOrders
-                resp = self.authAPI(
+                resp = self.auth_api(
                     "GET",
                     "/api/v3/allOrders",
                     {"symbol": market, "recvWindow": self.recv_window},
                 )
+
+                if isinstance(resp, str) and resp.endswith("Invalid symbol."):
+                    return "Invalid market."
 
                 # unexpected data, then return
                 if len(resp) == 0:
@@ -504,28 +509,29 @@ class AuthAPI(AuthAPIBase):
 
             return df
 
-        except:
+        except Exception:
             return pd.DataFrame()
 
-    def getTime(self) -> datetime:
+    def get_time(self) -> datetime:
         """Retrieves the exchange time"""
 
         try:
             # GET /api/v3/time
-            resp = self.authAPI("GET", "/api/v3/time")
+            resp = self.auth_api("GET", "/api/v3/time")
             return self.convert_time(int(resp["serverTime"])) - timedelta(hours=1)
         except Exception as e:
-            Logger.error(f"Error: {e}")
+            if self.app:
+                RichText.notify(f"Error: {e}", self.app, "error")
             return None
 
-    def getMarketInfoFilters(self, market: str) -> pd.DataFrame:
+    def get_market_info_filters(self, market: str) -> pd.DataFrame:
         """Retrieves markets exchange info"""
 
         df = pd.DataFrame()
 
         try:
             # GET /api/v3/exchangeInfo
-            resp = self.authAPI("GET", "/api/v3/exchangeInfo", {"symbol": market})
+            resp = self.auth_api("GET", "/api/v3/exchangeInfo", {"symbol": market})
 
             # unexpected data, then return
             if len(resp) == 0:
@@ -541,10 +547,10 @@ class AuthAPI(AuthAPIBase):
 
             return df
 
-        except:
+        except Exception:
             return df
 
-    def getTradeFee(self, market: str) -> float:
+    def get_trade_fee(self, market: str) -> float:
         """Retrieves the trade fees"""
 
         # Binance US does not currently define "/sapi/v1/asset/tradeFee" in its API
@@ -553,7 +559,7 @@ class AuthAPI(AuthAPIBase):
 
         try:
             # GET /sapi/v1/asset/tradeFee
-            resp = self.authAPI(
+            resp = self.auth_api(
                 "GET",
                 "/sapi/v1/asset/tradeFee",
                 {"symbol": market, "recvWindow": self.recv_window},
@@ -568,14 +574,14 @@ class AuthAPI(AuthAPIBase):
             else:
                 return DEFAULT_TRADE_FEE_RATE
 
-        except:
+        except Exception:
             return DEFAULT_TRADE_FEE_RATE
 
-    def getTicker(self, market: str = DEFAULT_MARKET, websocket=None) -> tuple:
+    def get_ticker(self, market: str = DEFAULT_MARKET, websocket=None) -> tuple:
         """Retrieves the market ticker"""
 
         # validates the market is syntactically correct
-        if not self._isMarketValid(market):
+        if not self._is_market_valid(market):
             raise TypeError("Binance market required.")
 
         now = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
@@ -591,55 +597,52 @@ class AuthAPI(AuthAPIBase):
                     float(row["price"].values[0]),
                 )
 
-            except:
+            except Exception:
                 return (now, 0.0)
 
         try:
             # GET /api/v3/ticker/price
-            resp = self.authAPI("GET", "/api/v3/ticker/price", {"symbol": market})
+            resp = self.auth_api("GET", "/api/v3/ticker/price", {"symbol": market})
 
             # unexpected data, then return
             if len(resp) == 0:
                 return pd.DataFrame()
 
             if "price" in resp:
-                return (str(self.getTime()), float(resp["price"]))
+                return (str(self.get_time()), float(resp["price"]))
             else:
                 return (now, 0.0)
-        except:
+        except Exception:
             return (now, 0.0)
 
-    def marketBuy(
-        self, market: str = "", quote_quantity: float = 0, test: bool = False
-    ) -> list:
+    def market_buy(self, market: str = "", quote_quantity: float = 0, test: bool = False) -> list:
         """Executes a market buy providing a funding amount"""
 
         # validates the market is syntactically correct
-        if not self._isMarketValid(market):
+        if not self._is_market_valid(market):
             raise ValueError("Binance market is invalid.")
 
         # validates quote_quantity is either an integer or float
-        if not isinstance(quote_quantity, int) and not isinstance(
-            quote_quantity, float
-        ):
+        if not isinstance(quote_quantity, int) and not isinstance(quote_quantity, float):
             raise TypeError("The funding amount is not numeric.")
 
         try:
-            current_price = self.getTicker(market)[1]
+            current_price = self.get_ticker(market)[1]
 
             base_quantity = np.divide(quote_quantity, current_price)
 
-            df_filters = self.getMarketInfoFilters(market)
-            step_size = float(
-                df_filters.loc[df_filters["filterType"] == "LOT_SIZE"]["stepSize"]
-            )
+            df_filters = self.get_market_info_filters(market)
+            if df_filters.empty:
+                return "Invalid market."
+
+            step_size = float(df_filters.loc[df_filters["filterType"] == "LOT_SIZE"]["stepSize"])
             precision = int(round(-math.log(step_size, 10), 0))
 
             # remove fees
-            base_quantity = base_quantity - (base_quantity * self.getTradeFee(market))
+            base_quantity = base_quantity - (base_quantity * self.get_trade_fee(market))
 
             # execute market buy
-            stepper = 10.0 ** precision
+            stepper = 10.0**precision
             truncated = math.trunc(stepper * base_quantity) / stepper
 
             order = {
@@ -650,45 +653,40 @@ class AuthAPI(AuthAPIBase):
                 "recvWindow": self.recv_window,
             }
 
-            # Logger.debug(order)
-
             # POST /api/v3/order/test
             if test is True:
-                resp = self.authAPI("POST", "/api/v3/order/test", order)
+                resp = self.auth_api("POST", "/api/v3/order/test", order)
             else:
-                resp = self.authAPI("POST", "/api/v3/order", order)
+                resp = self.auth_api("POST", "/api/v3/order", order)
 
             return resp
         except Exception as err:
             ts = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-            Logger.error(f"{ts} Binance  marketBuy {str(err)}")
+            if self.app:
+                RichText.notify(f"{ts} Binance  market_buy {str(err)}", self.app, "error")
             return []
 
-    def marketSell(
-        self, market: str = "", base_quantity: float = 0, test: bool = False, use_fees: bool = True
-    ) -> list:
+    def market_sell(self, market: str = "", base_quantity: float = 0, test: bool = False, use_fees: bool = True) -> list:
         """Executes a market sell providing a crypto amount"""
 
         # validates the market is syntactically correct
-        if not self._isMarketValid(market):
+        if not self._is_market_valid(market):
             raise ValueError("Binance market is invalid.")
 
         if not isinstance(base_quantity, int) and not isinstance(base_quantity, float):
             raise TypeError("The crypto amount is not numeric.")
 
         try:
-            df_filters = self.getMarketInfoFilters(market)
-            step_size = float(
-                df_filters.loc[df_filters["filterType"] == "LOT_SIZE"]["stepSize"]
-            )
+            df_filters = self.get_market_info_filters(market)
+            step_size = float(df_filters.loc[df_filters["filterType"] == "LOT_SIZE"]["stepSize"])
             precision = int(round(-math.log(step_size, 10), 0))
 
             # remove fees
             if use_fees:
-                base_quantity = base_quantity - (base_quantity * self.getTradeFee(market))
+                base_quantity = base_quantity - (base_quantity * self.get_trade_fee(market))
 
             # execute market sell
-            stepper = 10.0 ** precision
+            stepper = 10.0**precision
             truncated = math.trunc(stepper * base_quantity) / stepper
 
             order = {
@@ -699,27 +697,26 @@ class AuthAPI(AuthAPIBase):
                 "recvWindow": self.recv_window,
             }
 
-            # Logger.debug(order)
-
             # POST /api/v3/order/test
             if test is True:
-                resp = self.authAPI("POST", "/api/v3/order/test", order)
+                resp = self.auth_api("POST", "/api/v3/order/test", order)
             else:
-                resp = self.authAPI("POST", "/api/v3/order", order)
+                resp = self.auth_api("POST", "/api/v3/order", order)
 
             return resp
         except Exception as err:
             ts = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-            Logger.error(f"{ts} Binance  marketSell {str(err)}")
+            if self.app:
+                RichText.notify(f"{ts} Binance  market_sell {str(err)}", self.app, "error")
             return []
 
-    def authAPI(self, method: str, uri: str, payload: str = {}) -> dict:
+    def auth_api(self, method: str, uri: str, payload: str = {}) -> dict:
         """Initiates a REST API call to the exchange"""
 
         if not isinstance(method, str):
             raise TypeError("Method is not a string.")
 
-        if not method in ["GET", "POST"]:
+        if method not in ["GET", "POST"]:
             raise TypeError("Method not GET or POST.")
 
         if not isinstance(uri, str):
@@ -735,19 +732,12 @@ class AuthAPI(AuthAPIBase):
 
         query_string = urlencode(payload, True)
         if uri in signed_uri and query_string:
-            query_string = "{}&timestamp={}".format(query_string, self.getTimestamp())
+            query_string = "{}&timestamp={}".format(query_string, self.get_timestamp())
         elif uri in signed_uri:
-            query_string = "timestamp={}".format(self.getTimestamp())
+            query_string = "timestamp={}".format(self.get_timestamp())
 
         if uri in signed_uri:
-            url = (
-                self._api_url
-                + uri
-                + "?"
-                + query_string
-                + "&signature="
-                + self.createHash(query_string)
-            )
+            url = self._api_url + uri + "?" + query_string + "&signature=" + self.createHash(query_string)
         else:
             url = self._api_url + uri + "?" + query_string
 
@@ -763,30 +753,30 @@ class AuthAPI(AuthAPIBase):
             else:
                 resp_message = ""
 
-            if resp.status_code == 400 and (
-                resp_message
-                == "Timestamp for this request is outside of the recvWindow."
-            ):
-                message = f"{method} ({resp.status_code}) {self._api_url}{uri} - {resp_message} (hint: increase recvWindow with --recvWindow <5000-60000>)"
-                Logger.error(f"Error: {message}")
+            if resp.status_code == 400 and (resp_message == "Timestamp for this request is outside of the recvWindow."):
+                message = f"{method} ({resp.status_code}) {self._api_url}{uri} - {resp_message} (hint: increase recvWindow with --recvwindow <5000-60000>)"
+                if self.app:
+                    RichText.notify(f"Error: {message}", self.app, "error")
                 return {}
             elif resp.status_code == 400 and resp_message.__contains__("Invalid quantity"):
                 message = f"{method} Invalid order quantity (hint: (binance only) try using use_sell_fee: 0)"
-                Logger.error(f"{message}")
+                if self.app:
+                    RichText.notify(f"{message}", self.app, "error")
                 return {}
-            elif resp.status_code == 429 and (
-                resp_message.startswith("Too much request weight used")
-            ):
+            elif resp.status_code == 429 and (resp_message.startswith("Too much request weight used")):
                 message = f"{method} ({resp.status_code}) {self._api_url}{uri} - {resp_message} (sleeping for 5 seconds to prevent being banned)"
-                Logger.error(f"Error: {message}")
+                if self.app:
+                    RichText.notify(f"Error: {message}", self.app, "error")
                 time.sleep(5)
                 return {}
             elif resp.status_code != 200:
                 message = f"{method} ({resp.status_code}) {self._api_url}{uri} - {resp_message}"
                 if self.die_on_api_error:
-                    raise Exception(message)
+                    raise RuntimeError(message)
                 else:
-                    Logger.error(f"Error: {message}")
+                    if self.app:
+                        RichText.notify(f"Error: {message}", self.app, "error")
+                        raise RuntimeError(message)
                     return {}
 
             resp.raise_for_status()
@@ -804,25 +794,30 @@ class AuthAPI(AuthAPIBase):
         except json.decoder.JSONDecodeError as err:
             return self.handle_api_error(err, "JSONDecodeError")
 
-    def handle_api_error(self, err: str, reason: str) -> dict:
+        except Exception as err:
+            return str(err)
+
+    def handle_api_error(self, err: str, reason: str, app: object = None) -> dict:
         """Handler for API errors"""
 
-        if self.debug:
+        if app is not None and app.debug is True:
             if self.die_on_api_error:
                 raise SystemExit(err)
             else:
-                Logger.error(err)
+                if self.app:
+                    RichText.notify(err, self.app, "error")
                 return {}
         else:
             if self.die_on_api_error:
                 raise SystemExit(f"{reason}: {self._api_url}")
             else:
-                Logger.info(f"{reason}: {self._api_url}")
+                if self.app:
+                    RichText.notify(f"{reason}: {self._api_url}", self.app, "info")
                 return {}
 
 
 class PublicAPI(AuthAPIBase):
-    def __init__(self, api_url="https://api.binance.com") -> None:
+    def __init__(self, api_url="https://api.binance.com", app: object = None) -> None:
         """Binance API object model
 
         Parameters
@@ -832,7 +827,6 @@ class PublicAPI(AuthAPIBase):
         """
 
         # options
-        self.debug = False
         self.die_on_api_error = False
 
         valid_urls = [
@@ -845,32 +839,36 @@ class PublicAPI(AuthAPIBase):
         if api_url not in valid_urls:
             raise ValueError("Binance API URL is invalid")
 
+        # app
+        self.app = app
+
         self._api_url = api_url
 
-    def getTime(self) -> datetime:
+    def get_time(self) -> datetime:
         """Retrieves the exchange time"""
 
         try:
             # GET /api/v3/time
-            resp = self.authAPI("GET", "/api/v3/time")
+            resp = self.auth_api("GET", "/api/v3/time")
             return self.convert_time(int(resp["serverTime"])) - timedelta(hours=1)
         except Exception as e:
-            Logger.error(f"Error: {e}")
+            if self.app:
+                RichText.notify(f"Error: {e}", self.app, "error")
             return None
 
-    def getMarkets24HrStats(self) -> pd.DataFrame():
+    def get_markets_24hr_stats(self) -> pd.DataFrame():
         """Retrieves exchange markets 24hr stats"""
 
         try:
-            return self.authAPI("GET", "/api/v3/ticker/24hr")
-        except:
+            return self.auth_api("GET", "/api/v3/ticker/24hr")
+        except Exception:
             return pd.DataFrame()
 
-    def getTicker(self, market: str = DEFAULT_MARKET, websocket=None) -> tuple:
+    def get_ticker(self, market: str = DEFAULT_MARKET, websocket=None) -> tuple:
         """Retrieves the market ticker"""
 
         # validates the market is syntactically correct
-        if not self._isMarketValid(market):
+        if not self._is_market_valid(market):
             raise TypeError("Binance market required.")
 
         now = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
@@ -886,18 +884,18 @@ class PublicAPI(AuthAPIBase):
                     float(row["price"].values[0]),
                 )
 
-            except:
+            except Exception:
                 return (now, 0.0)
 
         # GET /api/v3/ticker/price
-        resp = self.authAPI("GET", "/api/v3/ticker/price", {"symbol": market})
+        resp = self.auth_api("GET", "/api/v3/ticker/price", {"symbol": market})
 
         if "price" in resp:
-            return (str(self.getTime()), float(resp["price"]))
+            return (str(self.get_time()), float(resp["price"]))
         else:
             return (now, 0.0)
 
-    def getHistoricalData(
+    def get_historical_data(
         self,
         market: str = DEFAULT_MARKET,
         granularity: Granularity = Granularity.ONE_HOUR,
@@ -908,8 +906,12 @@ class PublicAPI(AuthAPIBase):
         """Retrieves historical market data"""
 
         # validates the market is syntactically correct
-        if not self._isMarketValid(market):
+        if not self._is_market_valid(market):
             raise TypeError("Binance market required.")
+
+        # validates granularity is an enum
+        if not isinstance(granularity, Granularity):
+            raise TypeError("Granularity Enum required.")
 
         # validates the ISO 8601 end date is a string (if provided)
         if not isinstance(iso8601end, str):
@@ -921,20 +923,15 @@ class PublicAPI(AuthAPIBase):
                 try:
                     df = websocket.candles.loc[websocket.candles["market"] == market]
                     using_websocket = True
-                except:
+                except Exception:
                     pass
 
         if websocket is None or (websocket is not None and using_websocket is False):
             if iso8601start != "" and iso8601end == "":
-                startTime = int(
-                    datetime.timestamp(
-                        datetime.strptime(iso8601start, "%Y-%m-%dT%H:%M:%S")
-                    )
-                    * 1000
-                )
+                startTime = int(datetime.timestamp(datetime.strptime(iso8601start, "%Y-%m-%dT%H:%M:%S")) * 1000)
 
                 # GET /api/v3/klines
-                resp = self.authAPI(
+                resp = self.auth_api(
                     "GET",
                     "/api/v3/klines",
                     {
@@ -944,32 +941,48 @@ class PublicAPI(AuthAPIBase):
                         "limit": 300,
                     },
                 )
+
             elif iso8601start != "" and iso8601end != "":
-                startTime = int(
-                    datetime.timestamp(
-                        datetime.strptime(iso8601start, "%Y-%m-%dT%H:%M:%S")
-                    )
-                    * 1000
-                )
+                startTime = int(datetime.timestamp(datetime.strptime(iso8601start, "%Y-%m-%dT%H:%M:%S")) * 1000)
 
                 # GET /api/v3/klines
-                resp = self.authAPI(
-                    "GET",
-                    "/api/v3/klines",
-                    {
-                        "symbol": market,
-                        "interval": granularity.to_short,
-                        "startTime": startTime,
-                        "limit": 300,
-                    },
-                )
+                if isinstance(granularity, Granularity):
+                    resp = self.auth_api(
+                        "GET",
+                        "/api/v3/klines",
+                        {
+                            "symbol": market,
+                            "interval": granularity.to_short,
+                            "startTime": startTime,
+                            "limit": 300,
+                        },
+                    )
+                else:
+                    resp = self.auth_api(
+                        "GET",
+                        "/api/v3/klines",
+                        {
+                            "symbol": market,
+                            "interval": granularity,
+                            "startTime": startTime,
+                            "limit": 300,
+                        },
+                    )
+
             else:
                 # GET /api/v3/klines
-                resp = self.authAPI(
-                    "GET",
-                    "/api/v3/klines",
-                    {"symbol": market, "interval": granularity.to_short, "limit": 300},
-                )
+                if isinstance(granularity, Granularity):
+                    resp = self.auth_api(
+                        "GET",
+                        "/api/v3/klines",
+                        {"symbol": market, "interval": granularity.to_short, "limit": 300},
+                    )
+                else:
+                    resp = self.auth_api(
+                        "GET",
+                        "/api/v3/klines",
+                        {"symbol": market, "interval": granularity, "limit": 300},
+                    )
 
             # convert the API response into a Pandas DataFrame
             df = pd.DataFrame(
@@ -991,7 +1004,10 @@ class PublicAPI(AuthAPIBase):
             )
 
             df["market"] = market
-            df["granularity"] = granularity.to_short
+            if isinstance(granularity, Granularity):
+                df["granularity"] = granularity.to_short
+            else:
+                df["granularity"] = granularity
 
             # binance epoch is too long
             df["open_time"] = df["open_time"] + 1
@@ -1000,7 +1016,7 @@ class PublicAPI(AuthAPIBase):
 
             try:
                 freq = granularity.get_frequency
-            except:
+            except Exception:
                 freq = "D"
 
             # convert the DataFrame into a time series with the date as the index/key
@@ -1015,9 +1031,7 @@ class PublicAPI(AuthAPIBase):
                 df.index.names = ["ts"]
                 df["date"] = tsidx
             except ValueError:
-                tsidx = pd.DatetimeIndex(
-                    pd.to_datetime(df["open_time"], unit="s"), dtype="datetime64[ns]"
-                )
+                tsidx = pd.DatetimeIndex(pd.to_datetime(df["open_time"], unit="s"), dtype="datetime64[ns]")
                 df.set_index(tsidx, inplace=True)
                 df = df.drop(columns=["open_time"])
                 df.index.names = ["ts"]
@@ -1053,13 +1067,13 @@ class PublicAPI(AuthAPIBase):
 
         return df
 
-    def authAPI(self, method: str, uri: str, payload: str = {}) -> dict:
+    def auth_api(self, method: str, uri: str, payload: str = {}) -> dict:
         """Initiates a REST API call to exchange"""
 
         if not isinstance(method, str):
             raise TypeError("Method is not a string.")
 
-        if not method in ["GET", "POST"]:
+        if method not in ["GET", "POST"]:
             raise TypeError("Method not GET or POST.")
 
         if not isinstance(uri, str):
@@ -1074,7 +1088,8 @@ class PublicAPI(AuthAPIBase):
                 if self.die_on_api_error:
                     raise Exception(message)
                 else:
-                    Logger.error(f"Error: {message}")
+                    if self.app:
+                        RichText.notify(f"Error: {message}", self.app, "error")
                     return {}
 
             resp.raise_for_status()
@@ -1092,34 +1107,29 @@ class PublicAPI(AuthAPIBase):
         except json.decoder.JSONDecodeError as err:
             return self.handle_api_error(err, "JSONDecodeError")
 
-    def handle_api_error(self, err: str, reason: str) -> dict:
+    def handle_api_error(self, err: str, reason: str, app: object = None) -> dict:
         """Handler for API errors"""
 
-        if self.debug:
+        if app is not None and app.debug is True:
             if self.die_on_api_error:
                 raise SystemExit(err)
             else:
-                Logger.error(err)
+                if self.app:
+                    RichText.notify(err, self.app, "error")
                 return {}
         else:
             if self.die_on_api_error:
                 raise SystemExit(f"{reason}: {self._api_url}")
             else:
-                Logger.info(f"{reason}: {self._api_url}")
+                if self.app:
+                    RichText.notify(f"{reason}: {self._api_url}", self.app, "info")
                 return {}
 
 
 class WebSocket(AuthAPIBase):
     def __init__(
-        self,
-        market=None,
-        granularity: Granularity = None,
-        api_url="https://api.binance.com",
-        ws_url: str = "wss://stream.binance.com:9443",
+        self, market=None, granularity: Granularity = None, api_url="https://api.binance.com", ws_url: str = "wss://stream.binance.com:9443", app: object = None
     ) -> None:
-        # options
-        self.debug = False
-
         valid_urls = [
             "https://api.binance.com",
             "https://api.binance.us",
@@ -1144,6 +1154,9 @@ class WebSocket(AuthAPIBase):
 
         if ws_url[-1] != "/":
             ws_url = ws_url + "/"
+
+        # app
+        self.app = app
 
         self._ws_url = ws_url
         self._api_url = api_url
@@ -1196,7 +1209,7 @@ class WebSocket(AuthAPIBase):
         self.start_time = datetime.now()
 
     def _keepalive(self, interval=30):
-        if (self.ws is not None) and (hasattr(self.ws,"connected")):
+        if (self.ws is not None) and (hasattr(self.ws, "connected")):
             while self.ws.connected:
                 self.ws.ping("keepalive")
                 time.sleep(interval)
@@ -1234,17 +1247,21 @@ class WebSocket(AuthAPIBase):
         self.thread.join()
 
     def on_open(self):
-        Logger.info("-- Websocket Subscribed! --")
+        if self.app:
+            RichText.notify("-- Websocket Subscribed! --", self.app, "info")
 
     def on_close(self):
-        Logger.info("-- Websocket Closed --")
+        if self.app:
+            RichText.notify("-- Websocket Closed --", self.app, "info")
 
     def on_message(self, msg):
-        Logger.info(msg)
+        if self.app:
+            RichText.notify(msg, self.app, "info")
 
-    def on_error(self, e, data=None):
-        Logger.error(e)
-        Logger.error("{} - data: {}".format(e, data))
+    def on_error(self, e: str = "", data=None):
+        if self.app and e != "":
+            RichText.notify(e, self.app, "error")
+            RichText.notify("{} - data: {}".format(e, data), self.app, "error")
 
         self.stop = True
         try:
@@ -1253,13 +1270,13 @@ class WebSocket(AuthAPIBase):
             self.candles = None
             self.start_time = None
             self.time_elapsed = 0
-        except:
+        except Exception:
             pass
 
     def getStartTime(self) -> datetime:
         return self.start_time
 
-    def getTimeElapsed(self) -> int:
+    def get_timeElapsed(self) -> int:
         return self.time_elapsed
 
 
@@ -1270,13 +1287,14 @@ class WebSocketClient(WebSocket, AuthAPIBase):
         granularity: Granularity = Granularity.ONE_HOUR,
         api_url="https://api.binance.com",
         ws_url: str = "wss://stream.binance.com:9443",
+        app: object = None,
     ) -> None:
         if len(markets) == 0:
             raise ValueError("A list of one or more markets is required.")
 
         for market in markets:
             # validates the market is syntactically correct
-            if not self._isMarketValid(market):
+            if not self._is_market_valid(market):
                 raise ValueError("Binance market is invalid.")
 
         valid_urls = [
@@ -1310,6 +1328,9 @@ class WebSocketClient(WebSocket, AuthAPIBase):
         if ws_url[-1] != "/":
             ws_url = ws_url + "/"
 
+        # app
+        self.app = app
+
         self._ws_url = ws_url
         self.markets = markets
         self.granularity = granularity
@@ -1324,24 +1345,17 @@ class WebSocketClient(WebSocket, AuthAPIBase):
 
     def on_message(self, msg):
         if self.start_time is not None:
-            self.time_elapsed = round(
-                (datetime.now() - self.start_time).total_seconds()
-            )
+            self.time_elapsed = round((datetime.now() - self.start_time).total_seconds())
 
         if "e" in msg:
             df = None
-            if (
-                msg["e"] == "24hrMiniTicker"
-                and "E" in msg
-                and "s" in msg
-                and "c" in msg
-            ):
+            if msg["e"] == "24hrMiniTicker" and "E" in msg and "s" in msg and "c" in msg:
                 # create dataframe from websocket message
                 df = pd.DataFrame(
                     columns=["date", "market", "price"],
                     data=[
                         [
-                            self.convert_time(msg["E"]),
+                            self.convert_time(msg["E"]) - timedelta(hours=1),
                             msg["s"],
                             msg["c"],
                         ]
@@ -1359,32 +1373,16 @@ class WebSocketClient(WebSocket, AuthAPIBase):
                     self.tickers = df
                 # append future entries without duplicates
                 elif self.tickers is not None and len(df) > 0:
-                    self.tickers = (
-                        pd.concat([self.tickers, df])
-                        .drop_duplicates(subset="market", keep="last")
-                        .reset_index(drop=True)
-                    )
+                    self.tickers = pd.concat([self.tickers, df]).drop_duplicates(subset="market", keep="last").reset_index(drop=True)
 
                 # convert dataframes to a time series
-                tsidx = pd.DatetimeIndex(
-                    pd.to_datetime(self.tickers["date"]).dt.strftime(
-                        "%Y-%m-%dT%H:%M:%S.%Z"
-                    )
-                )
+                tsidx = pd.DatetimeIndex(pd.to_datetime(self.tickers["date"]).dt.strftime("%Y-%m-%dT%H:%M:%S.%Z"))
                 self.tickers.set_index(tsidx, inplace=True)
                 self.tickers.index.name = "ts"
 
             if msg["e"] == "kline" and "s" in msg and "k" in msg:
                 k = msg["k"]
-                if (
-                    "i" in k
-                    and "t" in k
-                    and "o" in k
-                    and "h" in k
-                    and "c" in k
-                    and "l" in k
-                    and "v" in k
-                ):
+                if "i" in k and "t" in k and "o" in k and "h" in k and "c" in k and "l" in k and "v" in k:
                     # create dataframe from websocket message
                     df = pd.DataFrame(
                         columns=[
@@ -1399,7 +1397,7 @@ class WebSocketClient(WebSocket, AuthAPIBase):
                         ],
                         data=[
                             [
-                                self.convert_time(k["t"]), # - timedelta(hours=1),
+                                self.convert_time(k["t"]) - timedelta(hours=1),
                                 msg["s"],
                                 k["i"],
                                 float(k["l"]),
@@ -1412,9 +1410,7 @@ class WebSocketClient(WebSocket, AuthAPIBase):
                     )
 
                     if self.candles is None:
-                        resp = PublicAPI().getHistoricalData(
-                            df["market"].values[0], self.granularity
-                        )
+                        resp = PublicAPI().get_historical_data(df["market"].values[0], self.granularity)
                         if len(resp) > 0:
                             self.candles = resp
                         else:
@@ -1433,19 +1429,17 @@ class WebSocketClient(WebSocket, AuthAPIBase):
                             )
 
                     if k["i"] == self.granularity.to_short and k["x"] is True:
-                        # check if the current candle exists
-                        candle_exists = (
-                            (self.candles["date"] == df["date"].values[0])
-                            & (self.candles["market"] == df["market"].values[0])
-                        ).any()
-                        if not candle_exists:
-                            self.candles = pd.concat([self.candles, df]) #self.candles.append(df)
+                        try:
+                            self.candles.drop(index=str(self.tickers[self.tickers["market"] == msg["s"]].candle[0]), inplace=True)
+                        except KeyError:
+                            pass
 
-                        tsidx = pd.DatetimeIndex(
-                            pd.to_datetime(self.candles["date"]).dt.strftime(
-                                "%Y-%m-%dT%H:%M:%S.%Z"
-                            )
-                        )
+                        # check if the current candle exists
+                        candle_exists = ((self.candles["date"] == df["date"].values[0]) & (self.candles["market"] == df["market"].values[0])).any()
+                        if not candle_exists:
+                            self.candles = pd.concat([self.candles, df])
+
+                        tsidx = pd.DatetimeIndex(pd.to_datetime(self.candles["date"]).dt.strftime("%Y-%m-%dT%H:%M:%S.%Z"))
                         self.candles.set_index(tsidx, inplace=True)
                         self.candles.index.name = "ts"
 
@@ -1459,7 +1453,6 @@ class WebSocketClient(WebSocket, AuthAPIBase):
                         self.candles["high"] = self.candles["high"].astype("float64")
                         self.candles["close"] = self.candles["close"].astype("float64")
                         self.candles["low"] = self.candles["low"].astype("float64")
-                        self.candles["volume"] = self.candles["volume"].astype(
-                            "float64"
-                        )
+                        self.candles["volume"] = self.candles["volume"].astype("float64")
+
         self.message_count += 1

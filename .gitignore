@@ -131,9 +131,10 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-.vscode
+# .vscode
 
 config.json
+config-coinbase.json
 config-coinbasepro.json
 config-binance.json
 scanner.json
@@ -157,6 +158,8 @@ telegram_logs
 config-*.yaml
 telegram_data/*
 screener.json
+models/Strategy_myCS.py
+models/Trading_myPta.py
 
 # WIP
 models/exchange/kraken

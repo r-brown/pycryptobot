@@ -51,7 +51,7 @@ CHOOSING, TYPING_REPLY = range(2)
 EXCHANGE, MARKET, ANYOVERRIDES, OVERRIDES, SAVE, START = range(6)
 EXCEPT_EXCHANGE, EXCEPT_MARKET = range(2)
 
-replykeyboard = [["Coinbase Pro", "Binance", "Kucoin"]]
+replykeyboard = [["Coinbase", "Coinbase Pro", "Binance", "Kucoin"]]
 
 markup = ReplyKeyboardMarkup(replykeyboard, one_time_keyboard=True)
 
@@ -179,12 +179,15 @@ class TelegramBot(TelegramBotBase):
             return ConversationHandler.END
 
         if (
-            update.message.text == "Coinbase Pro"
+            update.message.text == "Coinbase"
+            or update.message.text == "Coinbase Pro"
             or update.message.text == "Kucoin"
             or update.message.text == "Binance"
         ):
             self.exchange = update.message.text.lower()
-            if update.message.text == "Coinbase Pro":
+            if update.message.text == "Coinbase":
+                self.exchange = "coinbase"
+            elif update.message.text == "Coinbase Pro":
                 self.exchange = "coinbasepro"
         else:
             if self.exchange == "":
@@ -207,7 +210,7 @@ class TelegramBot(TelegramBotBase):
             )
             return ConversationHandler.END
 
-        if self.exchange in ("coinbasepro", "kucoin"):
+        if self.exchange in ("coinbase", "coinbasepro", "kucoin"):
             p = re.compile(r"^[0-9A-Z]{1,20}\-[1-9A-Z]{2,5}$")
             if not p.match(update.message.text):
                 self.helper.send_telegram_message(
@@ -321,9 +324,11 @@ class TelegramBot(TelegramBotBase):
             )
             return ConversationHandler.END
 
-        if update.message.text in ("Coinbase Pro", "Kucoin", "Binance"):
+        if update.message.text in ("Coinbase", "Coinbase Pro", "Kucoin", "Binance"):
             self.exchange = update.message.text.lower()
-            if update.message.text == "Coinbase Pro":
+            if update.message.text == "Coinbase":
+                self.exchange = "coinbase"
+            elif update.message.text == "Coinbase Pro":
                 self.exchange = "coinbasepro"
         else:
             if self.exchange == "":
@@ -353,7 +358,7 @@ class TelegramBot(TelegramBotBase):
             )
             return ConversationHandler.END
 
-        if self.exchange in ("coinbasepro", "kucoin"):
+        if self.exchange in ("coinbase", "coinbasepro", "kucoin"):
             p = re.compile(r"^[0-9A-Z]{1,20}\-[1-9A-Z]{2,5}$")
             if not p.match(update.message.text):
                 self.helper.send_telegram_message(
@@ -385,6 +390,7 @@ class TelegramBot(TelegramBotBase):
         output = self.helper.start_process(
             self.pair, self.exchange, "--stats --live 1", "telegram", True
         )
+
         self.helper.send_telegram_message(update, output, context=context)
 
         return ConversationHandler.END
@@ -494,7 +500,7 @@ class TelegramBot(TelegramBotBase):
                 try:
                     self.helper.read_data()
                     if "markets" in self.helper.data:
-                        if not self.pair in self.helper.data["markets"]:
+                        if self.pair not in self.helper.data["markets"]:
                             self.helper.data["markets"].update(
                                 {
                                     self.pair: {
@@ -611,7 +617,7 @@ class TelegramBot(TelegramBotBase):
                     sleep(30)
                 self.updater.start_polling()
                 return
-        except:  # pylint: disable=bare-except
+        except Exception:
             pass
 
     def done(self, update, context):
@@ -623,17 +629,17 @@ class TelegramBot(TelegramBotBase):
         try:
             urllib.request.urlopen("https://api.telegram.org")
             return True
-        except:  # pylint: disable=bare-except
+        except Exception:
             print("No internet connection")
             return False
 
-    def ExceptionExchange(self, update, context):
+    def exception_exchange(self, update, context):
         """start new bot ask which exchange"""
         self._question_which_exchange(update, context)
 
         return EXCEPT_EXCHANGE
 
-    def ExceptionPair(self, update, context):
+    def exception_pair(self, update, context):
         if not self._check_if_allowed(
             context._user_id_and_data[0], update
         ):  # pylint: disable=protected-access
@@ -645,14 +651,14 @@ class TelegramBot(TelegramBotBase):
 
         return EXCEPT_MARKET
 
-    def ExceptionAdd(self, update, context):
+    def exception_add(self, update, context):
         """start bot - save if required ask if want to start"""
         if not self._check_if_allowed(
             context._user_id_and_data[0], update
         ):  # pylint: disable=protected-access
             return None
 
-        self.helper.logger.info("called ExceptionAdd")
+        self.helper.logger.info("called exception_add")
 
         self._answer_which_pair(update, context)
 
@@ -661,7 +667,7 @@ class TelegramBot(TelegramBotBase):
         if "scannerexceptions" not in self.helper.data:
             self.helper.data.update({"scannerexceptions": {}})
 
-        if not self.pair in self.helper.data["scannerexceptions"]:
+        if self.pair not in self.helper.data["scannerexceptions"]:
             write_ok, try_count = False, 0
             while not write_ok and try_count <= 5:
                 try_count += 1
@@ -685,7 +691,7 @@ class TelegramBot(TelegramBotBase):
 
         return ConversationHandler.END
 
-    def ExceptionRemove(self, update, context):
+    def exception_remove(self, update, context):
         if not self._check_if_allowed(
             context._user_id_and_data[0], update
         ):  # pylint: disable=protected-access
@@ -714,8 +720,7 @@ class TelegramBot(TelegramBotBase):
 
     def scanning(self, update, context):
         """calling /startscanner from Telegram command list"""
-        if not self._check_if_allowed(
-            context._user_id_and_data[0], update):  # pylint: disable=protected-access
+        if not self._check_if_allowed(context._user_id_and_data[0], update):
             return
 
         self.handler.get_scanner_options(None)
@@ -740,6 +745,8 @@ class TelegramBot(TelegramBotBase):
             if file.__contains__("output.json"):
                 if file.__contains__("coinbasepro"):
                     exchange = "coinbasepro"
+                elif file.__contains__("coinbase"):
+                    exchange = "coinbase"
                 if file.__contains__("binance"):
                     exchange = "binance"
                 if file.__contains__("kucoin"):
@@ -773,7 +780,7 @@ class TelegramBot(TelegramBotBase):
                     update, "Pausing before next set", context=context
                 )
 
-    def getBotList(self, update, context):
+    def get_bot_list(self, update, context):
         if not self._check_if_allowed(
             context._user_id_and_data[0], update
         ):  # pylint: disable=protected-access
@@ -803,8 +810,7 @@ class TelegramBot(TelegramBotBase):
                 update, "<b>No bots found.</b>", context=context
             )
 
-    def Request(self, update, context):
-
+    def request(self, update, context):
         userid = context._user_id_and_data[0]  # pylint: disable=protected-access
 
         if self._check_if_allowed(userid, update):
@@ -834,27 +840,27 @@ def main():
     )
     dp.add_handler(CommandHandler("cleandata", botconfig.cleandata, Filters.text))
     dp.add_handler(
-        CommandHandler("removeexception", botconfig.ExceptionRemove, Filters.text)
+        CommandHandler("removeexception", botconfig.exception_remove, Filters.text)
     )
 
-    dp.add_handler(CommandHandler("ex", botconfig.getBotList))
+    dp.add_handler(CommandHandler("ex", botconfig.get_bot_list))
     dp.add_handler(CommandHandler("statsgroup", botconfig.statstwo))
     # Response to Question handler
     dp.add_handler(CallbackQueryHandler(botconfig.handler.get_response))
 
-    dp.add_handler(CommandHandler("controlPanel", botconfig.Request))
+    dp.add_handler(CommandHandler("controlPanel", botconfig.request))
 
     conversation_exception = ConversationHandler(
-        entry_points=[CommandHandler("addexception", botconfig.ExceptionExchange)],
+        entry_points=[CommandHandler("addexception", botconfig.exception_exchange)],
         states={
             EXCEPT_EXCHANGE: [
                 MessageHandler(
-                    Filters.text, botconfig.ExceptionPair, pass_user_data=True
+                    Filters.text, botconfig.exception_pair, pass_user_data=True
                 )
             ],
             EXCEPT_MARKET: [
                 MessageHandler(
-                    Filters.text, botconfig.ExceptionAdd, pass_user_data=True
+                    Filters.text, botconfig.exception_add, pass_user_data=True
                 )
             ],
         },

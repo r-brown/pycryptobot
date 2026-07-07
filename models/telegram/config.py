@@ -27,6 +27,8 @@ class ConfigEditor:
                 return "coinbasepro"
             if exchange_int == 3:
                 return "kucoin"
+            if exchange_int == 4:
+                return "coinbase"
 
         if exchange_str != "":
             if exchange_str == "scanner":
@@ -37,6 +39,8 @@ class ConfigEditor:
                 return 2
             if exchange_str == "kucoin":
                 return 3
+            if exchange_str == "coinbase":
+                return 4
         return None
 
     def get_config_from_file(self, exchange: str = "binance"):
@@ -45,24 +49,15 @@ class ConfigEditor:
 
         for param in self.helper.config[exchange]["config"]:
             if type(self.helper.config[exchange]["config"][param]) is float:
-                config["float"].update(
-                    {param: self.helper.config[exchange]["config"][param]}
-                )
+                config["float"].update({param: self.helper.config[exchange]["config"][param]})
             elif param.__contains__("disable"):
-                config["disabled"].update(
-                    {param: self.helper.config[exchange]["config"][param]}
-                )
+                config["disabled"].update({param: self.helper.config[exchange]["config"][param]})
             elif type(self.helper.config[exchange]["config"][param]) is int and (
-                self.helper.config[exchange]["config"][param] > 1
-                or self.helper.config[exchange]["config"][param] < 0
+                self.helper.config[exchange]["config"][param] > 1 or self.helper.config[exchange]["config"][param] < 0
             ):
-                config["int"].update(
-                    {param: self.helper.config[exchange]["config"][param]}
-                )
+                config["int"].update({param: self.helper.config[exchange]["config"][param]})
             elif type(self.helper.config[exchange]["config"][param]) is int:
-                config["normal"].update(
-                    {param: self.helper.config[exchange]["config"][param]}
-                )
+                config["normal"].update({param: self.helper.config[exchange]["config"][param]})
 
         return config
 
@@ -75,10 +70,7 @@ class ConfigEditor:
                 config["float"].update({param: self.helper.config["scanner"][param]})
             elif param.__contains__("disable"):
                 config["disabled"].update({param: self.helper.config["scanner"][param]})
-            elif type(self.helper.config["scanner"][param]) is int and (
-                self.helper.config["scanner"][param] > 1
-                or self.helper.config["scanner"][param] < 0
-            ):
+            elif type(self.helper.config["scanner"][param]) is int and (self.helper.config["scanner"][param] > 1 or self.helper.config["scanner"][param] < 0):
                 config["int"].update({param: self.helper.config["scanner"][param]})
             elif type(self.helper.config["scanner"][param]) is int:
                 config["normal"].update({param: self.helper.config["scanner"][param]})
@@ -93,12 +85,9 @@ class ConfigEditor:
             if type(self.helper.screener[exchange][param]) is float:
                 config["float"].update({param: self.helper.screener[exchange][param]})
             elif param.__contains__("disable"):
-                config["disabled"].update(
-                    {param: self.helper.screener[exchange][param]}
-                )
+                config["disabled"].update({param: self.helper.screener[exchange][param]})
             elif type(self.helper.screener[exchange][param]) is int and (
-                self.helper.screener[exchange][param] > 1
-                or self.helper.screener[exchange][param] < 0
+                self.helper.screener[exchange][param] > 1 or self.helper.screener[exchange][param] < 0
             ):
                 config["int"].update({param: self.helper.screener[exchange][param]})
             elif type(self.helper.screener[exchange][param]) is int:
@@ -106,16 +95,15 @@ class ConfigEditor:
 
         return config
 
-    def get_config_options(
-        self, update: Update, context: CallbackContext, callback: str = ""
-    ):
+    def get_config_options(self, update: Update, context: CallbackContext, callback: str = ""):
         """Get Config Options"""
         query = update.callback_query
         if callback == "":
             if query.data.__contains__("edit_"):
                 exchange = query.data.replace("edit_", "")
             elif (
-                query.data.__contains__(Exchange.COINBASEPRO.value)
+                query.data.__contains__(Exchange.COINBASE.value)
+                or query.data.__contains__(Exchange.COINBASEPRO.value)
                 or query.data.__contains__(Exchange.BINANCE.value)
                 or query.data.__contains__(Exchange.KUCOIN.value)
                 or query.data.__contains__("scanner")
@@ -130,7 +118,7 @@ class ConfigEditor:
                 if callback_json["c"] == callbacktags.SCREENER:
                     exchange = "screener"
                     callback = callback_json["e"]
-            except: # pylint: disable=bare-except
+            except Exception:
                 exchange = callback
 
         buttons = []
@@ -151,9 +139,7 @@ class ConfigEditor:
                 InlineKeyboardButton(
                     f"{light_icon} {prop}",
                     callback_data=self.helper.create_callback_data(
-                        callbacktags.DISABLE[0]
-                        if config_value == 1
-                        else callbacktags.ENABLE[0],
+                        callbacktags.DISABLE[0] if config_value == 1 else callbacktags.ENABLE[0],
                         cb_exchange,
                         prop,
                     ),  # f"{exchange}_{'disable' if config_value == 1 else 'enable' }_({prop})",
@@ -167,9 +153,7 @@ class ConfigEditor:
                 InlineKeyboardButton(
                     f"{light_icon} {prop}",
                     callback_data=self.helper.create_callback_data(
-                        callbacktags.DISABLE[0]
-                        if config_value == 1
-                        else callbacktags.ENABLE[0],
+                        callbacktags.DISABLE[0] if config_value == 1 else callbacktags.ENABLE[0],
                         cb_exchange,
                         prop,
                     ),  # f"{exchange}_{'disable' if config_value == 1 else 'enable' }_({prop})",
@@ -181,9 +165,7 @@ class ConfigEditor:
             buttons.append(
                 InlineKeyboardButton(
                     f"{prop}: {config_value}",
-                    callback_data=self.helper.create_callback_data(
-                        callbacktags.FLOAT[0], cb_exchange, prop
-                    ),  # f"{exchange}_float_{prop}",
+                    callback_data=self.helper.create_callback_data(callbacktags.FLOAT[0], cb_exchange, prop),  # f"{exchange}_float_{prop}",
                 )
             )
 
@@ -195,9 +177,7 @@ class ConfigEditor:
             buttons.append(
                 InlineKeyboardButton(
                     f"{prop}: {config_value}",
-                    callback_data=self.helper.create_callback_data(
-                        callbacktags.INTEGER[0], cb_exchange, prop
-                    ),  # f"{exchange}_integer_{prop}",
+                    callback_data=self.helper.create_callback_data(callbacktags.INTEGER[0], cb_exchange, prop),  # f"{exchange}_integer_{prop}",
                 )
             )
 
@@ -214,9 +194,7 @@ class ConfigEditor:
                 [
                     InlineKeyboardButton(
                         "Granularity",
-                        callback_data=self.helper.create_callback_data(
-                            callbacktags.GRANULARITY[0], exchange
-                        ),
+                        callback_data=self.helper.create_callback_data(callbacktags.GRANULARITY[0], exchange),
                     )
                 ]
             )
@@ -224,9 +202,7 @@ class ConfigEditor:
             [
                 InlineKeyboardButton(
                     "\U0001F4BE Save",
-                    callback_data=self.helper.create_callback_data(
-                        callbacktags.SAVECONFIG[0]
-                    ),
+                    callback_data=self.helper.create_callback_data(callbacktags.SAVECONFIG[0]),
                 )
             ]
         )
@@ -240,13 +216,10 @@ class ConfigEditor:
         )
 
         self.helper.send_telegram_message(
-            update,
-            f"<b>{exchange.capitalize()} Config Options.</b>",
-            InlineKeyboardMarkup(keyboard, one_time_keyboard=True),
-            context, new_message=False
+            update, f"<b>{exchange.capitalize()} Config Options.</b>", InlineKeyboardMarkup(keyboard, one_time_keyboard=True), context, new_message=False
         )
 
-    def get_scanner_options(self, update: Update, context: CallbackContext): #pylint: disable=missing-function-docstring
+    def get_scanner_options(self, update: Update, context: CallbackContext):
         buttons = []
         config_properties = self.helper.config["scanner"]
         for prop in config_properties:
@@ -257,9 +230,7 @@ class ConfigEditor:
                 InlineKeyboardButton(
                     f"{light_icon} {prop}",
                     callback_data=self.helper.create_callback_data(
-                        callbacktags.DISABLE[0]
-                        if config_value == 1
-                        else callbacktags.ENABLE[0],
+                        callbacktags.DISABLE[0] if config_value == 1 else callbacktags.ENABLE[0],
                         "scanner",
                         prop,
                     ),  # f"scanner_{'disable' if config_value == 1 else 'enable' }_{prop}",
@@ -279,9 +250,7 @@ class ConfigEditor:
             [
                 InlineKeyboardButton(
                     "\U0001F4BE Save",
-                    callback_data=self.helper.create_callback_data(
-                        callbacktags.SAVECONFIG[0]
-                    ),
+                    callback_data=self.helper.create_callback_data(callbacktags.SAVECONFIG[0]),
                 )
             ]
         )
@@ -289,9 +258,7 @@ class ConfigEditor:
             [
                 InlineKeyboardButton(
                     "Reload all running bots",
-                    callback_data=self.helper.create_callback_data(
-                        callbacktags.RELOADCONFIG[0]
-                    ),
+                    callback_data=self.helper.create_callback_data(callbacktags.RELOADCONFIG[0]),
                 )
             ]
         )
@@ -305,10 +272,7 @@ class ConfigEditor:
         )
 
         self.helper.send_telegram_message(
-            update,
-            "<b>Scanner Config Options.</b>",
-            InlineKeyboardMarkup(keyboard, one_time_keyboard=True),
-            context, new_message=False
+            update, "<b>Scanner Config Options.</b>", InlineKeyboardMarkup(keyboard, one_time_keyboard=True), context, new_message=False
         )
 
     def disable_option(self, exchange, parameter):
@@ -331,48 +295,37 @@ class ConfigEditor:
         """Increase value"""
         exchange = self.exchange_convert(exchange_int=int(exchange))
         if exchange != "scanner":
-            self.helper.config[exchange]["config"][parameter] = round(
-                self.helper.config[exchange]["config"][parameter] + unitsize, 1
-            )
+            self.helper.config[exchange]["config"][parameter] = round(self.helper.config[exchange]["config"][parameter] + unitsize, 1)
         else:
-            self.helper.config[exchange][parameter] = round(
-                self.helper.config[exchange][parameter] + unitsize, 1
-            )
+            self.helper.config[exchange][parameter] = round(self.helper.config[exchange][parameter] + unitsize, 1)
 
     def decrease_value(self, exchange, parameter, unitsize):
         """Decrease value"""
         exchange = self.exchange_convert(exchange_int=int(exchange))
         if exchange != "scanner":
-            self.helper.config[exchange]["config"][parameter] = round(
-                self.helper.config[exchange]["config"][parameter] - unitsize, 1
-            )
+            self.helper.config[exchange]["config"][parameter] = round(self.helper.config[exchange]["config"][parameter] - unitsize, 1)
         else:
-            self.helper.config[exchange][parameter] = round(
-                self.helper.config[exchange][parameter] - unitsize, 1
-            )
+            self.helper.config[exchange][parameter] = round(self.helper.config[exchange][parameter] - unitsize, 1)
 
     def save_updated_config(self, update):
         """Save config file"""
         self.helper.write_config()
         self.helper.send_telegram_message(update, "<b>Config File Updated</b>", new_message=False)
 
-    def get_granularity(self, update, exchange, context): #pylint: disable=missing-function-docstring
+    def get_granularity(self, update, exchange, context):
         cb_exchange = self.exchange_convert(exchange_str=exchange)
         buttons = []
         for gran in Granularity:
-            config_value = (
-                self.helper.config[exchange]["config"]["granularity"]
-                if "granularity" in self.helper.config[exchange]["config"]
-                else "SS"
-            )
-            gran_convert = gran.to_integer if exchange == "coinbasepro" else gran.to_short if exchange == "kucoin" else gran.to_medium
-            light_icon = (
-                "\U0001F534" if config_value != str(gran_convert) else "\U0001F7E2") #U0001F7E2
+            config_value = self.helper.config[exchange]["config"]["granularity"] if "granularity" in self.helper.config[exchange]["config"] else "SS"
+            gran_convert = gran.to_integer if exchange in ["coinbase", "coinbasepro"] else gran.to_short if exchange == "kucoin" else gran.to_medium
+            light_icon = "\U0001F534" if config_value != str(gran_convert) else "\U0001F7E2"  # U0001F7E2
 
             buttons.append(
                 InlineKeyboardButton(
                     f"{light_icon} {gran.name}",
-                    callback_data=self.helper.create_callback_data(callbacktags.GRANULARITY[0], cb_exchange, gran.name) #f"{cb_exchange}_granularity_({gran.name})",
+                    callback_data=self.helper.create_callback_data(
+                        callbacktags.GRANULARITY[0], cb_exchange, gran.name
+                    ),  # f"{cb_exchange}_granularity_({gran.name})",
                 )
             )
 
@@ -390,13 +343,15 @@ class ConfigEditor:
             [
                 InlineKeyboardButton(
                     f"{light_icon} Smart Switch",
-                    callback_data=self.helper.create_callback_data(callbacktags.GRANULARITY[0], cb_exchange, "smartswitch") #f"{exchange}_granularity_(smartswitch)",
+                    callback_data=self.helper.create_callback_data(
+                        callbacktags.GRANULARITY[0], cb_exchange, "smartswitch"
+                    ),  # f"{exchange}_granularity_(smartswitch)",
                 )
             ]
         )
 
         keyboard.append(
-            [InlineKeyboardButton("\U0001F4BE Save", callback_data=self.helper.create_callback_data(callbacktags.SAVECONFIG[0]))] # "save_config")]
+            [InlineKeyboardButton("\U0001F4BE Save", callback_data=self.helper.create_callback_data(callbacktags.SAVECONFIG[0]))]  # "save_config")]
         )
         keyboard.append(
             [
@@ -415,6 +370,5 @@ class ConfigEditor:
 
 
 #     def conversation_handler(self, update, context):
-#
 #         self.helper.send_telegram_message(update, self.helper.config["binance"]["granularity"], context=context)
 #         # return VALUE_ENTRY

@@ -2,28 +2,31 @@ import time
 import json
 import pandas as pd
 
-from models.PyCryptoBot import PyCryptoBot
+from controllers.PyCryptoBot import PyCryptoBot
 from models.exchange import kucoin
 from models.helper.TelegramBotHelper import TelegramBotHelper as TGBot
 from models.Trading import TechnicalAnalysis
 from models.exchange.binance import PublicAPI as BPublicAPI
+from models.exchange.coinbase import AuthAPI as CBAuthAPI
+from models.config.coinbase_parser import parser as coinbaseParser
 from models.exchange.coinbase_pro import PublicAPI as CPublicAPI
 from models.exchange.kucoin import PublicAPI as KPublicAPI
 from models.exchange.Granularity import Granularity
 from models.exchange.ExchangesEnum import Exchange
 
 GRANULARITY = Granularity(Granularity.ONE_HOUR)
+
 try:
     with open("scanner.json", encoding='utf8') as json_file:
         config = json.load(json_file)
 except IOError as err:
-    print (err)
+    print(err)
 
 try:
     with open("config.json", encoding='utf8') as json_file:
         bot_config = json.load(json_file)
 except IOError as err:
-    print (err)
+    print(err)
 
 for exchange in config:
     ex = Exchange(exchange)
@@ -31,6 +34,10 @@ for exchange in config:
     for quote in config[ex.value]["quote_currency"]:
         if ex == Exchange.BINANCE:
             api = BPublicAPI(bot_config[ex.value]["api_url"])
+        elif ex == Exchange.COINBASE:
+            # Read config from key file
+            coinbaseParser(app, bot_config[ex.value])
+            api = CBAuthAPI(bot_config[ex.value]["api_key"], bot_config[ex.value]["api_secret"], bot_config[ex.value]["api_url"])
         elif ex == Exchange.COINBASEPRO:
             api = CPublicAPI()
         elif ex == Exchange.KUCOIN:
@@ -39,11 +46,16 @@ for exchange in config:
             raise ValueError(f"Invalid exchange: {ex}")
 
         markets = []
-        resp = api.getMarkets24HrStats()
+        resp = api.get_markets_24hr_stats()
         if ex == Exchange.BINANCE:
             for row in resp:
                 if row["symbol"].endswith(quote):
                     markets.append(row)
+        elif ex == Exchange.COINBASE:
+            for market in resp:
+                if market.endswith(f"-{quote}"):
+                    resp[market]["stats_24hour"]["market"] = market
+                    markets.append(resp[market]["stats_24hour"])
         elif ex == Exchange.COINBASEPRO:
             for market in resp:
                 if market.endswith(f"-{quote}"):
@@ -55,16 +67,16 @@ for exchange in config:
                 if result["symbol"].endswith(f"-{quote}"):
                     markets.append(result)
 
-
         df_markets = pd.DataFrame(markets)
 
         if ex == Exchange.BINANCE:
             df_markets = df_markets[["symbol", "lastPrice", "quoteVolume"]]
+        elif ex == Exchange.COINBASE:
+            df_markets = df_markets[["market", "last", "volume"]]
         elif ex == Exchange.COINBASEPRO:
             df_markets = df_markets[["market", "last", "volume"]]
         elif ex == Exchange.KUCOIN:
             df_markets = df_markets[["symbol", "last", "volValue"]]
-
 
         df_markets.columns = ["market", "price", "volume"]
         df_markets["price"] = df_markets["price"].astype(float)
@@ -75,15 +87,15 @@ for exchange in config:
         print("Processing, please wait...")
 
         ROW = 1
-        for market, data in df_markets.T.iteritems():
+        for market, data in df_markets.T.items():
             print(f"[{ROW}/{len(df_markets)}] {market} {round((ROW/len(df_markets))*100, 2)}%")
             try:
                 if int(data["volume"]) > 0:
-                    ta = TechnicalAnalysis(api.getHistoricalData(market, GRANULARITY, None))
-                    ta.addEMA(12)
-                    ta.addEMA(26)
-                    ta.addATR(72)
-                    df_1h = ta.getDataFrame()
+                    ta = TechnicalAnalysis(api.get_historical_data(market, GRANULARITY, None), app=app)
+                    ta.add_ema(12)
+                    ta.add_ema(26)
+                    ta.add_atr(72)
+                    df_1h = ta.get_df()
                     df_1h["ema12ltema26"] = df_1h.ema12 < df_1h.ema26
                     df_1h_last = df_1h.tail(1)
 
@@ -115,4 +127,3 @@ for exchange in config:
         )
 
         TGBot(app, scanner=True).save_scanner_output(ex.value, quote, df_markets)
-
